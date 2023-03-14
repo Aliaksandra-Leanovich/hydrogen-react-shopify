@@ -13,6 +13,7 @@ import {
   Money,
   ShopifyAnalyticsProduct,
   ShopPayButton,
+  parseMetafield,
   flattenConnection,
   type SeoHandleFunction,
   type SeoConfig,
@@ -94,6 +95,7 @@ export async function loader({params, request, context}: LoaderArgs) {
   if (!product?.id) {
     throw new Response(null, {status: 404});
   }
+  console.log('meta', product);
 
   const recommended = getRecommendedProducts(context.storefront, product.id);
   const firstVariant = product.variants.nodes[0];
@@ -123,8 +125,19 @@ export async function loader({params, request, context}: LoaderArgs) {
 
 export default function Product() {
   const {product, shop, recommended} = useLoaderData<typeof loader>();
-  const {media, title, vendor, descriptionHtml} = product;
+  const {media, title, vendor, descriptionHtml, metafields} = product;
   const {shippingPolicy, refundPolicy} = shop;
+
+  const firstVariant = product.variants.nodes[0];
+  const selectedVariant = product.selectedVariant ?? firstVariant;
+  const isOnSale =
+    selectedVariant?.price?.amount &&
+    selectedVariant?.compareAtPrice?.amount &&
+    selectedVariant?.price?.amount < selectedVariant?.compareAtPrice?.amount;
+  const metafield = product.metafield;
+  if (product) {
+    console.log('meta', product);
+  }
 
   return (
     <>
@@ -140,9 +153,21 @@ export default function Product() {
                 <Heading as="h1" className="whitespace-normal">
                   {title}
                 </Heading>
-                {vendor && (
-                  <Text className={'opacity-50 font-medium'}>{vendor}</Text>
-                )}
+                <Text as="span" className="flex  gap-4">
+                  <Money
+                    withoutTrailingZeros
+                    data={selectedVariant?.price!}
+                    as="span"
+                  />
+                  {isOnSale && (
+                    <Money
+                      withoutTrailingZeros
+                      data={selectedVariant?.compareAtPrice!}
+                      as="span"
+                      className="opacity-50 strike"
+                    />
+                  )}
+                </Text>
               </div>
               <ProductForm />
               <div className="grid gap-4 py-4">
@@ -191,11 +216,6 @@ export function ProductForm() {
   const [currentSearchParams] = useSearchParams();
   const transition = useTransition();
 
-  /**
-   * We update `searchParams` with in-flight request data from `transition` (if available)
-   * to create an optimistic UI, e.g. check the product option before the
-   * request has completed.
-   */
   const searchParams = useMemo(() => {
     return transition.location
       ? new URLSearchParams(transition.location.search)
@@ -204,12 +224,6 @@ export function ProductForm() {
 
   const firstVariant = product.variants.nodes[0];
 
-  /**
-   * We're making an explicit choice here to display the product options
-   * UI with a default variant, rather than wait for the user to select
-   * options first. Developers are welcome to opt-out of this behavior.
-   * By default, the first variant's options are used.
-   */
   const searchParamsWithDefaults = useMemo<URLSearchParams>(() => {
     const clonedParams = new URLSearchParams(searchParams);
 
@@ -222,23 +236,15 @@ export function ProductForm() {
     return clonedParams;
   }, [searchParams, firstVariant.selectedOptions]);
 
-  /**
-   * Likewise, we're defaulting to the first variant for purposes
-   * of add to cart if there is none returned from the loader.
-   * A developer can opt out of this, too.
-   */
   const selectedVariant = product.selectedVariant ?? firstVariant;
   const isOutOfStock = !selectedVariant?.availableForSale;
-
-  const isOnSale =
-    selectedVariant?.price?.amount &&
-    selectedVariant?.compareAtPrice?.amount &&
-    selectedVariant?.price?.amount < selectedVariant?.compareAtPrice?.amount;
 
   const productAnalytics: ShopifyAnalyticsProduct = {
     ...analytics.products[0],
     quantity: 1,
   };
+
+  console.log('meta', product);
 
   return (
     <div className="grid gap-10">
@@ -270,26 +276,10 @@ export function ProductForm() {
                   as="span"
                   className="flex items-center justify-center gap-2"
                 >
-                  <span>Add to Bag</span> <span>·</span>{' '}
-                  <Money
-                    withoutTrailingZeros
-                    data={selectedVariant?.price!}
-                    as="span"
-                  />
-                  {isOnSale && (
-                    <Money
-                      withoutTrailingZeros
-                      data={selectedVariant?.compareAtPrice!}
-                      as="span"
-                      className="opacity-50 strike"
-                    />
-                  )}
+                  Add to Cart
                 </Text>
               )}
             </AddToCartButton>
-            {!isOutOfStock && (
-              <ShopPayButton variantIds={[selectedVariant?.id!]} />
-            )}
           </div>
         )}
       </div>
@@ -318,15 +308,49 @@ function ProductOptions({
               {option.name}
             </Heading>
             <div className="flex flex-wrap items-baseline gap-4">
-              {/**
-               * First, we render a bunch of <Link> elements for each option value.
-               * When the user clicks one of these buttons, it will hit the loader
-               * to get the new data.
-               *
-               * If there are more than 7 values, we render a dropdown.
-               * Otherwise, we just render plain links.
-               */}
-              {option.values.length > 7 ? (
+              {option.name === 'Color' ? (
+                <>
+                  {option.values.map((value) => {
+                    const checked =
+                      searchParamsWithDefaults.get(option.name) === value;
+                    const id = `option-${option.name}-${value}`;
+
+                    return (
+                      // <Text key={id}>
+                      //   <ProductOptionLink
+                      //     optionName={option.name}
+                      //     optionValue={value}
+                      //     searchParams={searchParamsWithDefaults}
+                      //     className={clsx(
+                      //       'leading-none py-1 border-b-[1.5px] cursor-pointer transition-all duration-200',
+                      //       checked ? 'border-primary/50' : 'border-primary/0',
+                      //     )}
+                      //   />
+                      // </Text>
+                      <div
+                        key={id}
+                        className={clsx(
+                          'flex items-center justify-center rounded-full h-8 w-8 py-1 border-[1.5px] cursor-pointer transition-all duration-200',
+                          checked ? 'border-white' : 'border-primary/0',
+                        )}
+                      >
+                        <ProductOptionLink
+                          optionName={option.name}
+                          optionValue={value}
+                          searchParams={searchParamsWithDefaults}
+                        >
+                          <div
+                            className="rounded-full h-6 w-6"
+                            style={{backgroundColor: value}}
+                          >
+                            <span className="sr-only">{value}</span>
+                          </div>
+                        </ProductOptionLink>
+                      </div>
+                    );
+                  })}
+                </>
+              ) : (
                 <div className="relative w-full">
                   <Listbox>
                     {({open}) => (
@@ -386,28 +410,6 @@ function ProductOptions({
                     )}
                   </Listbox>
                 </div>
-              ) : (
-                <>
-                  {option.values.map((value) => {
-                    const checked =
-                      searchParamsWithDefaults.get(option.name) === value;
-                    const id = `option-${option.name}-${value}`;
-
-                    return (
-                      <Text key={id}>
-                        <ProductOptionLink
-                          optionName={option.name}
-                          optionValue={value}
-                          searchParams={searchParamsWithDefaults}
-                          className={clsx(
-                            'leading-none py-1 border-b-[1.5px] cursor-pointer transition-all duration-200',
-                            checked ? 'border-primary/50' : 'border-primary/0',
-                          )}
-                        />
-                      </Text>
-                    );
-                  })}
-                </>
               )}
             </div>
           </div>
@@ -440,15 +442,17 @@ function ProductOptionLink({
   clonedSearchParams.set(optionName, optionValue);
 
   return (
-    <Link
-      {...props}
-      preventScrollReset
-      prefetch="intent"
-      replace
-      to={`${path}?${clonedSearchParams.toString()}`}
-    >
-      {children ?? optionValue}
-    </Link>
+    <div>
+      <Link
+        {...props}
+        preventScrollReset
+        prefetch="intent"
+        replace
+        to={`${path}?${clonedSearchParams.toString()}`}
+      >
+        {children ?? optionValue}
+      </Link>
+    </div>
   );
 }
 

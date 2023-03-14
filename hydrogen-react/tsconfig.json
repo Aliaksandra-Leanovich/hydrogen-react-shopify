@@ -1,10 +1,5 @@
 {
-  "include": [
-    "./**/*.d.ts",
-    "./**/*.ts",
-    "./**/*.tsx",
-    "app/components/FeaturedProducts.server.jsx"
-  ],
+  "include": ["./**/*.d.ts", "./**/*.ts", "./**/*.tsx"],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "isolatedModules": true,
